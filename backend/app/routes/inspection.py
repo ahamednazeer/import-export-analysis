@@ -6,8 +6,10 @@ from werkzeug.utils import secure_filename
 from datetime import datetime
 from app import db
 from app.models.inspection import InspectionImage, InspectionResult
-from app.models.request import ProductRequest, Reservation, RequestStatus
+from app.models.request import ProductRequest, Reservation, RequestStatus, ReservationStatus
+from app.models.user import User
 from app.services.groq_ai import GroqAIService
+from app.services.source_completion import SourceCompletionService
 
 inspection_bp = Blueprint('inspection', __name__)
 
@@ -40,23 +42,55 @@ def upload_image():
     request_id = request.form.get('requestId')
     reservation_id = request.form.get('reservationId')
     image_type = request.form.get('imageType', 'package')
-    
+
     if not request_id:
         return jsonify({'message': 'requestId is required'}), 400
-    
+
     product_request = ProductRequest.query.get(request_id)
     if not product_request:
         return jsonify({'message': 'Request not found'}), 404
-    
+
+    # Verify that this warehouse has reservations for this request
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not user or not user.assigned_warehouse_id:
+        return jsonify({'message': 'User not assigned to a warehouse'}), 400
+
+    # Check if this warehouse has any reservations for this request
+    warehouse_has_reservations = Reservation.query.filter_by(
+        request_id=request_id,
+        warehouse_id=user.assigned_warehouse_id
+    ).count() > 0
+
+    if not warehouse_has_reservations:
+        return jsonify({'message': 'Unauthorized: your warehouse has no reservations for this request'}), 403
+
+    # If no reservation_id provided, auto-assign to this warehouse's reservation
+    if not reservation_id:
+        warehouse_reservation = Reservation.query.filter_by(
+            request_id=request_id,
+            warehouse_id=user.assigned_warehouse_id,
+            is_local=True
+        ).first()
+        if warehouse_reservation:
+            reservation_id = warehouse_reservation.id
+        # If no reservation found, we'll still create the image but it won't count toward completion
+
+    if reservation_id:
+        reservation = Reservation.query.get(reservation_id)
+        if reservation and reservation.warehouse_id != user.assigned_warehouse_id:
+            return jsonify({'message': 'Unauthorized: reservation does not belong to your warehouse'}), 403
+
     # Generate unique filename
     ext = file.filename.rsplit('.', 1)[1].lower()
     filename = f"{uuid.uuid4()}.{ext}"
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-    
+
     # Save file
     file.save(file_path)
     file_size = os.path.getsize(file_path)
-    
+
     # Create inspection record
     inspection = InspectionImage(
         request_id=request_id,
@@ -71,11 +105,15 @@ def upload_image():
     )
     
     db.session.add(inspection)
+
+    user_warehouse_id = user.assigned_warehouse_id
     
-    # Update request status
-    if product_request.status == RequestStatus.PICKING:
+    warehouse_reservations = [r for r in product_request.reservations if r.warehouse_id == user_warehouse_id]
+    warehouse_all_picked = all(r.is_picked for r in warehouse_reservations) if warehouse_reservations else False
+    
+    if warehouse_all_picked and product_request.status == RequestStatus.PICKING:
         product_request.status = RequestStatus.INSPECTION_PENDING
-    
+
     db.session.commit()
     
     # Run AI analysis asynchronously (for now, sync)
@@ -104,28 +142,126 @@ def upload_image():
             if reservation:
                 reservation.is_blocked = True
                 reservation.block_reason = ai_result['result']
+                reservation.reservation_status = ReservationStatus.AI_DAMAGED
         
-        # Update request status based on inspection result
-        if ai_result['result'] in ['DAMAGED', 'EXPIRED', 'LOW_CONFIDENCE']:
-            # Mark as partially blocked - needs procurement manager review
+        # Initialize source completion service for Joint Wait model
+        source_completion = SourceCompletionService()
+        
+        if ai_result['result'] in ['DAMAGED', 'EXPIRED']:
+            all_reservations = Reservation.query.filter_by(request_id=request_id).all()
+            
+            warehouses_in_request = set(r.warehouse_id for r in all_reservations if r.warehouse_id)
+            
+            warehouses_all_inspected = set()
+            for warehouse_id in warehouses_in_request:
+                warehouse_reservations = [r for r in all_reservations if r.warehouse_id == warehouse_id]
+                
+                warehouse_inspected_count = InspectionImage.query.filter(
+                    InspectionImage.request_id == request_id,
+                    InspectionImage.reservation_id.in_([r.id for r in warehouse_reservations]),
+                    InspectionImage.result.in_([
+                        InspectionResult.OK,
+                        InspectionResult.DAMAGED,
+                        InspectionResult.EXPIRED
+                    ])
+                ).count()
+                
+                if warehouse_inspected_count == len(warehouse_reservations):
+                    warehouses_all_inspected.add(warehouse_id)
+            
+            all_blocked = Reservation.query.filter_by(
+                request_id=request_id,
+                is_blocked=True
+            ).count()
+
+            total_reservations = Reservation.query.filter_by(request_id=request_id).count()
+
+            if all_blocked == total_reservations and total_reservations > 0:
+                product_request.status = RequestStatus.BLOCKED
+                print(f"[INSPECTION] Request {product_request.id} marked as BLOCKED - all reservations damaged")
+            else:
+                # JOINT WAIT: Set to PARTIALLY_BLOCKED, let procurement handle
+                # Procurement will use SourceCompletionService after resolution
+                product_request.status = RequestStatus.PARTIALLY_BLOCKED
+                print(f"[INSPECTION] Request {product_request.id} marked as PARTIALLY_BLOCKED - {all_blocked}/{total_reservations} reservations blocked")
+
+        elif ai_result['result'] == 'LOW_CONFIDENCE':
+            # LOW_CONFIDENCE requires procurement review
+            # Update reservation status to indicate low confidence
+            if reservation_id:
+                reservation = Reservation.query.get(reservation_id)
+                if reservation:
+                    reservation.reservation_status = ReservationStatus.AI_LOW_CONFIDENCE
+            
             product_request.status = RequestStatus.PARTIALLY_BLOCKED
-            print(f"[INSPECTION] Request {product_request.id} marked as PARTIALLY_BLOCKED due to {ai_result['result']}")
+            print(f"[INSPECTION] Request {product_request.id} has LOW_CONFIDENCE result - flagged for procurement review")
+
         elif ai_result['result'] == 'OK':
-            # Check if all inspections for this request are OK
-            all_inspections = InspectionImage.query.filter_by(request_id=request_id).all()
-            all_ok = all(img.result == InspectionResult.OK or img.result == InspectionResult.PROCESSING for img in all_inspections)
-            if all_ok and product_request.status == RequestStatus.INSPECTION_PENDING:
-                # All inspections passed - ready for allocation
-                product_request.status = RequestStatus.READY_FOR_ALLOCATION
-                print(f"[INSPECTION] Request {product_request.id} marked as READY_FOR_ALLOCATION - all inspections OK")
+            # JOINT WAIT MODEL: Mark this reservation as AI-confirmed
+            # Then trigger completion check to see if ALL sources are ready
+            
+            # Mark this reservation as picked and AI-confirmed
+            if reservation_id:
+                reservation = Reservation.query.get(reservation_id)
+                if reservation:
+                    # Auto-mark as picked when AI confirms (uploading = already picked)
+                    if not reservation.is_picked:
+                        reservation.is_picked = True
+                        reservation.picked_at = datetime.utcnow()
+                        print(f"[INSPECTION] Reservation {reservation_id} auto-marked as picked")
+                    
+                    reservation.ai_confirmed = True
+                    reservation.ai_confirmation_date = datetime.utcnow()
+                    reservation.reservation_status = ReservationStatus.AI_CONFIRMED
+                    print(f"[INSPECTION] Reservation {reservation_id} marked as AI_CONFIRMED")
+            
+            # Check if this action completed picking for the warehouse (re-check for auto-pick scenarios)
+            # Fetch fresh list or trust identity map
+            warehouse_reservations = [r for r in product_request.reservations if r.warehouse_id == user_warehouse_id]
+            warehouse_all_picked = all(r.is_picked for r in warehouse_reservations) if warehouse_reservations else False
+            
+            if warehouse_all_picked and product_request.status == RequestStatus.PICKING:
+                product_request.status = RequestStatus.INSPECTION_PENDING
+                print(f"[INSPECTION] Request {request_id} picking complete for warehouse - set to INSPECTION_PENDING")
+            
+            # Commit current changes first
+            db.session.commit()
+            
+            # JOINT WAIT: Use SourceCompletionService to check if ALL sources are ready
+            # This will transition to READY_FOR_ALLOCATION only when all sources complete
+            all_ready = source_completion.check_all_sources_ready(int(request_id))
+            
+            if all_ready:
+                print(f"[INSPECTION] Request {request_id} ALL SOURCES READY - transitioned to READY_FOR_ALLOCATION")
+            else:
+                # Some sources still pending - update status to waiting
+                if product_request.status == RequestStatus.INSPECTION_PENDING:
+                    product_request.status = RequestStatus.WAITING_FOR_ALL_PICKUPS
+                    db.session.commit()
+                print(f"[INSPECTION] Request {request_id} waiting for other sources to complete")
         
         db.session.commit()
         
     except Exception as e:
-        inspection.result = InspectionResult.ERROR
-        inspection.ai_raw_response = str(e)
-        db.session.commit()
+        print(f"[UPLOAD_ERROR] {str(e)}")
+        db.session.rollback()
+        
+        # Try to record the error on the inspection object if it exists
+        try:
+            # We need to fetch it again because rollback detached it
+            if 'inspection' in locals() and inspection.id:
+                insp = InspectionImage.query.get(inspection.id)
+                if insp:
+                    insp.result = InspectionResult.ERROR
+                    insp.ai_raw_response = str(e)
+                    db.session.commit()
+        except Exception as inner_e:
+            print(f"[UPLOAD_ERROR_RECOVERY_FAILED] {str(inner_e)}")
+
+        return jsonify({'message': f'Processing error: {str(e)}'}), 500
     
+    # Refresh inspection object to ensure it's bound to session
+    db.session.refresh(inspection)
     return jsonify(inspection.to_dict()), 201
 
 
@@ -143,6 +279,64 @@ def get_request_images(request_id):
     """Get all inspection images for a request"""
     images = InspectionImage.query.filter_by(request_id=request_id).all()
     return jsonify([i.to_dict() for i in images])
+
+
+@inspection_bp.route('/warehouse/tasks', methods=['GET'])
+@jwt_required()
+def get_warehouse_inspection_tasks():
+    """Get inspection tasks for the current warehouse operator's warehouse"""
+    claims = get_jwt()
+
+    if claims['role'] != 'WAREHOUSE_OPERATOR':
+        return jsonify({'message': 'Only warehouse operators can access this endpoint'}), 403
+
+    user_id = int(get_jwt_identity())
+    user = User.query.get(user_id)
+
+    if not user or not user.assigned_warehouse_id:
+        return jsonify({'message': 'User not assigned to a warehouse'}), 400
+
+    # Get reservations for this warehouse that need inspection (picked but not fully inspected)
+    from app.models.request import Reservation, ProductRequest, RequestStatus
+
+    reservations = Reservation.query.filter_by(
+        warehouse_id=user.assigned_warehouse_id,
+        is_local=True
+    ).filter(
+        Reservation.id.in_(
+            # Reservations that have been picked
+            db.session.query(Reservation.id).filter_by(
+                warehouse_id=user.assigned_warehouse_id,
+                is_local=True,
+                is_picked=True
+            )
+        )
+    ).outerjoin(
+        InspectionImage, InspectionImage.reservation_id == Reservation.id
+    ).filter(
+        # Reservations where inspection hasn't started or isn't complete
+        ~db.session.query(InspectionImage.id).filter(
+            InspectionImage.reservation_id == Reservation.id,
+            InspectionImage.result.in_([
+                InspectionResult.OK, 
+                InspectionResult.DAMAGED, 
+                InspectionResult.EXPIRED
+            ])
+        ).correlate(Reservation).exists()
+    ).all()
+
+    # Group by request for better UI presentation
+    tasks_by_request = {}
+    for reservation in reservations:
+        request_id = reservation.request_id
+        if request_id not in tasks_by_request:
+            tasks_by_request[request_id] = {
+                'request': reservation.request.to_dict(include_relations=False),
+                'reservations': []
+            }
+        tasks_by_request[request_id]['reservations'].append(reservation.to_dict(include_request=False))
+
+    return jsonify(list(tasks_by_request.values()))
 
 
 @inspection_bp.route('/<int:image_id>/override', methods=['POST'])

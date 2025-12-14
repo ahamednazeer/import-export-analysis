@@ -22,6 +22,12 @@ def create_app(config_name=None):
     db.init_app(app)
     jwt.init_app(app)
     CORS(app, origins=['http://localhost:3000'], supports_credentials=True, expose_headers=['Content-Disposition'])
+
+    with app.app_context():
+        # Import models so they are registered with SQLAlchemy
+        from app.models.user import User
+        from app.models.chat import ChatSession, ChatMessage
+        db.create_all()
     
     # Ensure upload folder exists
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -36,6 +42,7 @@ def create_app(config_name=None):
     from app.routes.procurement import procurement_bp
     from app.routes.logistics import logistics_bp
     from app.routes.admin import admin_bp
+    from app.routes.assistant import assistant_bp
     
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(products_bp, url_prefix='/products')
@@ -46,6 +53,7 @@ def create_app(config_name=None):
     app.register_blueprint(procurement_bp, url_prefix='/procurement')
     app.register_blueprint(logistics_bp, url_prefix='/logistics')
     app.register_blueprint(admin_bp, url_prefix='/admin')
+    app.register_blueprint(assistant_bp, url_prefix='/assistant')
     
     # Health check endpoint
     @app.route('/health')

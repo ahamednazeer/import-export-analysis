@@ -1,4 +1,6 @@
 from datetime import datetime
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy import func
 from app import db
 
 
@@ -84,11 +86,16 @@ class SupplierStock(db.Model):
         db.UniqueConstraint('supplier_id', 'product_id', name='uq_supplier_product'),
     )
     
-    @property
+    @hybrid_property
     def lead_time_days(self):
         """Get effective lead time"""
         return self.custom_lead_time_days or (self.supplier.lead_time_days if self.supplier else 7)
-    
+
+    @lead_time_days.expression
+    def lead_time_days(cls):
+        """SQL expression for lead_time_days"""
+        return func.coalesce(cls.custom_lead_time_days, Supplier.lead_time_days, 7)
+
     def to_dict(self):
         """Convert to dictionary"""
         return {

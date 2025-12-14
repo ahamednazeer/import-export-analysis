@@ -1,6 +1,7 @@
 export type Role =
     | 'DEALER'
     | 'WAREHOUSE_OPERATOR'
+    | 'SUPPLIER'
     | 'PROCUREMENT_MANAGER'
     | 'LOGISTICS_PLANNER'
     | 'ADMIN'
@@ -15,6 +16,8 @@ export type RequestStatus =
     | 'PICKING'
     | 'INSPECTION_PENDING'
     | 'PARTIALLY_BLOCKED'
+    | 'BLOCKED'
+    | 'IMPORT_APPROVED'
     | 'RESOLVED_PARTIAL'
     | 'READY_FOR_ALLOCATION'
     | 'ALLOCATED'
@@ -42,6 +45,7 @@ export type ShipmentStatus =
     | 'IN_TRANSIT'
     | 'OUT_FOR_DELIVERY'
     | 'DELIVERED'
+    | 'RECEIVED'
     | 'FAILED'
     | 'RETURNED';
 
@@ -54,6 +58,9 @@ export interface User {
     role: Role;
     isActive: boolean;
     assignedWarehouseId?: number;
+    assignedSupplierId?: number;
+    assignedWarehouse?: Warehouse;
+    assignedSupplier?: Supplier;
     createdAt: string;
 }
 
@@ -146,6 +153,14 @@ export interface ProductRequest {
     dealer?: User;
     product?: Product;
     reservations?: Reservation[];
+    // Warehouse-specific fields for warehouse operators
+    warehouseQuantity?: number;
+    warehouseReservations?: Reservation[];
+    inspectionProgress?: {
+        inspected: number;
+        total: number;
+        percentage: number;
+    };
 }
 
 export interface Reservation {
@@ -159,6 +174,8 @@ export interface Reservation {
     blockReason?: string;
     isPicked: boolean;
     pickedAt?: string;
+    aiConfirmed?: boolean;
+    reservationStatus?: string;
     isReplacement: boolean;
     createdAt: string;
     warehouse?: Warehouse;
@@ -197,6 +214,12 @@ export interface Shipment {
     id: number;
     trackingNumber: string;
     requestId: number;
+    // New fields for UI display
+    requestNumber?: string;
+    productName?: string;
+    warehouseName?: string;
+    supplierName?: string;
+
     reservationId?: number;
     warehouseId?: number;
     supplierId?: number;

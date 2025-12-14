@@ -17,6 +17,7 @@ import {
     ClipboardText,
     House,
 } from '@phosphor-icons/react';
+import AIAssistant from './AIAssistant';
 
 interface MenuItem {
     icon: React.ElementType;
@@ -29,6 +30,7 @@ interface DashboardLayoutProps {
     userRole?: string;
     userName?: string;
     userEmail?: string;
+    warehouseName?: string;
 }
 
 const menuItemsByRole: Record<string, MenuItem[]> = {
@@ -80,6 +82,7 @@ export default function DashboardLayout({
     userRole = 'DEALER',
     userName = 'User',
     userEmail = 'user@example.com',
+    warehouseName = '',
 }: DashboardLayoutProps) {
     const router = useRouter();
     const pathname = usePathname();
@@ -150,6 +153,12 @@ export default function DashboardLayout({
                         <div>
                             <h2 className="font-chivo font-bold text-xl uppercase tracking-wider">Operations Center</h2>
                             <p className="text-xs text-slate-400 font-mono mt-1">Welcome back, {userName}</p>
+                            {warehouseName && (
+                                <p className="text-xs text-green-400 font-bold font-mono mt-1 flex items-center gap-1">
+                                    <Warehouse size={14} weight="duotone" />
+                                    {warehouseName}
+                                </p>
+                            )}
                         </div>
                         <div className="flex items-center gap-4">
                             <div className="text-right">
@@ -164,6 +173,9 @@ export default function DashboardLayout({
                 <div className="p-6">
                     {children}
                 </div>
+
+                {/* AI Assistant */}
+                <AIAssistant userRole={userRole} />
             </main>
         </div>
     );

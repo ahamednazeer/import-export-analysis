@@ -155,8 +155,43 @@ class ApiClient {
         return this.request(`/warehouses/${warehouseId}/stock`);
     }
 
+    async updateWarehouseStock(warehouseId: number, stockData: any) {
+        return this.request(`/warehouses/${warehouseId}/stock`, {
+            method: 'POST',
+            body: JSON.stringify(stockData),
+        });
+    }
+
+    async deleteWarehouseStock(warehouseId: number, stockId: number) {
+        return this.request(`/warehouses/${warehouseId}/stock/${stockId}`, {
+            method: 'DELETE',
+        });
+    }
+
     async getProductStock(productId: number) {
         return this.request(`/warehouses/stock/product/${productId}`);
+    }
+
+    async getMyPickTasks() {
+        return this.request('/warehouses/my/pick-tasks');
+    }
+
+    async getMyCompletedTasks() {
+        return this.request('/warehouses/my/completed-tasks');
+    }
+
+    async pickReservation(reservationId: number) {
+        return this.request(`/warehouses/pick/${reservationId}`, {
+            method: 'POST',
+        });
+    }
+
+    async getWarehouseInspectionTasks() {
+        return this.request('/inspection/warehouse/tasks');
+    }
+
+    async getProductSuppliers(productId: number) {
+        return this.request(`/suppliers/products/${productId}`);
     }
 
     // Suppliers
@@ -179,6 +214,12 @@ class ApiClient {
         return this.request(`/suppliers/${supplierId}/products`, {
             method: 'POST',
             body: JSON.stringify(data),
+        });
+    }
+
+    async removeSupplierProduct(supplierId: number, productId: number) {
+        return this.request(`/suppliers/${supplierId}/products/${productId}`, {
+            method: 'DELETE',
         });
     }
 
@@ -237,6 +278,12 @@ class ApiClient {
 
     async markReadyForAllocation(requestId: number) {
         return this.request(`/procurement/ready-for-allocation/${requestId}`, {
+            method: 'POST',
+        });
+    }
+
+    async autoResolveBlocked(requestId: number) {
+        return this.request(`/procurement/auto-resolve-blocked/${requestId}`, {
             method: 'POST',
         });
     }
@@ -302,6 +349,67 @@ class ApiClient {
 
     async getSystemStats() {
         return this.request('/admin/stats');
+    }
+
+    async deleteUser(userId: number) {
+        return this.request(`/admin/users/${userId}`, {
+            method: 'DELETE',
+        });
+    }
+
+
+    // Joint Wait Model - Completion Status
+    async getCompletionStatus(requestId: number) {
+        return this.request(`/procurement/completion-status/${requestId}`);
+    }
+
+    // Supplier Confirmation (Joint Wait Model)
+    async getMyPendingSupplierReservations() {
+        return this.request('/suppliers/my/pending-reservations');
+    }
+
+    async confirmSupplierAvailability(reservationId: number, notes?: string) {
+        return this.request(`/suppliers/confirm-availability/${reservationId}`, {
+            method: 'POST',
+            body: JSON.stringify({ notes }),
+        });
+    }
+
+    async getMyConfirmedSupplierReservations() {
+        return this.request('/suppliers/my/confirmed-reservations');
+    }
+
+    async markSourceReady(reservationId: number, reason: string) {
+        return this.request('/procurement/mark-source-ready', {
+            method: 'POST',
+            body: JSON.stringify({ reservationId, reason }),
+        });
+    }
+
+    // AI Assistant
+    async chatWithAssistant(message: string) {
+        return this.request('/assistant/chat', {
+            method: 'POST',
+            body: JSON.stringify({ message }),
+        });
+    }
+
+    async getAssistantContext() {
+        return this.request('/assistant/context');
+    }
+
+    async getAssistantHistory() {
+        return this.request('/assistant/history');
+    }
+
+    async clearAssistantHistory() {
+        return this.request('/assistant/history', {
+            method: 'DELETE',
+        });
+    }
+
+    async getAssistantWelcome() {
+        return this.request('/assistant/welcome');
     }
 }
 

@@ -120,7 +120,12 @@ export default function AdminWarehousesPage() {
                             key: 'action',
                             label: 'Action',
                             render: (item) => (
-                                <button className="text-slate-400 hover:text-white text-xs underline">Manage Inventory</button>
+                                <button
+                                    onClick={() => router.push(`/admin/warehouses/${item.id}`)}
+                                    className="text-slate-400 hover:text-white text-xs underline"
+                                >
+                                    Manage Inventory
+                                </button>
                             ),
                         },
                     ]}

@@ -13,6 +13,7 @@ interface DataTableProps<T> {
     columns: Column<T>[];
     onRowClick?: (item: T) => void;
     emptyMessage?: string;
+    isLoading?: boolean;
 }
 
 export default function DataTable<T extends { id: number | string }>({
@@ -20,7 +21,16 @@ export default function DataTable<T extends { id: number | string }>({
     columns,
     onRowClick,
     emptyMessage = 'No data available',
+    isLoading = false,
 }: DataTableProps<T>) {
+    if (isLoading) {
+        return (
+            <div className="bg-slate-800/40 border border-slate-700/60 rounded-sm text-center py-12">
+                <p className="text-slate-400 animate-pulse">Loading data...</p>
+            </div>
+        );
+    }
+
     if (data.length === 0) {
         return (
             <div className="bg-slate-800/40 border border-slate-700/60 rounded-sm text-center py-12">

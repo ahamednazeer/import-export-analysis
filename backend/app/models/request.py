@@ -12,12 +12,30 @@ class RequestStatus(Enum):
     PICKING = 'PICKING'
     INSPECTION_PENDING = 'INSPECTION_PENDING'
     PARTIALLY_BLOCKED = 'PARTIALLY_BLOCKED'
+    BLOCKED = 'BLOCKED'  # All reservations damaged - needs full import
+    IMPORT_APPROVED = 'IMPORT_APPROVED'  # Auto-approved full import
     RESOLVED_PARTIAL = 'RESOLVED_PARTIAL'
-    READY_FOR_ALLOCATION = 'READY_FOR_ALLOCATION'
+    WAITING_FOR_ALL_PICKUPS = 'WAITING_FOR_ALL_PICKUPS'  # System waiting for all sources to complete
+    READY_FOR_ALLOCATION = 'READY_FOR_ALLOCATION'  # All sources complete, ready for logistics
     ALLOCATED = 'ALLOCATED'
     IN_TRANSIT = 'IN_TRANSIT'
     COMPLETED = 'COMPLETED'
     CANCELLED = 'CANCELLED'
+
+
+class ReservationStatus(Enum):
+    """Per-reservation status tracking for Joint Wait model"""
+    PENDING = 'PENDING'                    # Created, not yet picked
+    PICKED = 'PICKED'                      # Warehouse picked items
+    AI_PROCESSING = 'AI_PROCESSING'        # AI analyzing images
+    AI_CONFIRMED = 'AI_CONFIRMED'          # AI returned OK
+    AI_LOW_CONFIDENCE = 'AI_LOW_CONFIDENCE'  # Needs procurement review
+    AI_DAMAGED = 'AI_DAMAGED'              # AI detected damage
+    PROCUREMENT_RESOLVED = 'PROCUREMENT_RESOLVED'  # Procurement resolved issue
+    READY = 'READY'                        # Source is complete and ready
+    BLOCKED = 'BLOCKED'                    # Blocked, needs replacement
+    SUPPLIER_PENDING = 'SUPPLIER_PENDING'  # Waiting for supplier confirmation
+    SUPPLIER_CONFIRMED = 'SUPPLIER_CONFIRMED'  # Supplier confirmed availability
 
 
 class SourceType(Enum):
@@ -128,10 +146,22 @@ class Reservation(db.Model):
     is_blocked = db.Column(db.Boolean, default=False)
     block_reason = db.Column(db.String(50))  # DAMAGED, EXPIRED, LOW_CONFIDENCE
     
+    # NEW: Per-reservation status for Joint Wait model
+    reservation_status = db.Column(db.Enum(ReservationStatus), default=ReservationStatus.PENDING, index=True)
+    
     # Picking status
     is_picked = db.Column(db.Boolean, default=False)
     picked_at = db.Column(db.DateTime)
     picked_by_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    
+    # NEW: AI inspection completion tracking
+    ai_confirmed = db.Column(db.Boolean, default=False)
+    ai_confirmation_date = db.Column(db.DateTime)
+    
+    # NEW: Procurement resolution tracking
+    procurement_resolved = db.Column(db.Boolean, default=False)
+    procurement_resolved_at = db.Column(db.DateTime)
+    procurement_resolution_notes = db.Column(db.Text)
     
     # For replacements
     is_replacement = db.Column(db.Boolean, default=False)
@@ -148,6 +178,23 @@ class Reservation(db.Model):
     
     def to_dict(self, include_request=True):
         """Convert to dictionary"""
+        # Ensure relationships are loaded
+        warehouse_data = None
+        supplier_data = None
+
+        if self.warehouse_id and not self.warehouse:
+            # If warehouse_id exists but relationship not loaded, query it
+            from app.models.warehouse import Warehouse
+            self.warehouse = Warehouse.query.get(self.warehouse_id)
+
+        if self.supplier_id and not self.supplier:
+            # If supplier_id exists but relationship not loaded, query it
+            from app.models.supplier import Supplier
+            self.supplier = Supplier.query.get(self.supplier_id)
+
+        warehouse_data = self.warehouse.to_dict() if self.warehouse else None
+        supplier_data = self.supplier.to_dict() if self.supplier else None
+
         data = {
             'id': self.id,
             'requestId': self.request_id,
@@ -157,15 +204,20 @@ class Reservation(db.Model):
             'isLocal': self.is_local,
             'isBlocked': self.is_blocked,
             'blockReason': self.block_reason,
+            'reservationStatus': self.reservation_status.value if self.reservation_status else None,
             'isPicked': self.is_picked,
             'pickedAt': self.picked_at.isoformat() if self.picked_at else None,
+            'aiConfirmed': self.ai_confirmed,
+            'aiConfirmationDate': self.ai_confirmation_date.isoformat() if self.ai_confirmation_date else None,
+            'procurementResolved': self.procurement_resolved,
+            'procurementResolvedAt': self.procurement_resolved_at.isoformat() if self.procurement_resolved_at else None,
             'isReplacement': self.is_replacement,
             'createdAt': self.created_at.isoformat() if self.created_at else None,
-            'warehouse': self.warehouse.to_dict() if self.warehouse else None,
-            'supplier': self.supplier.to_dict() if self.supplier else None
+            'warehouse': warehouse_data,
+            'supplier': supplier_data
         }
-        
+
         if include_request:
             data['request'] = self.request.to_dict(include_relations=False) if self.request else None
-        
+
         return data

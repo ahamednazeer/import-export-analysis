@@ -63,24 +63,28 @@ export default function LogisticsDashboard() {
                             value={requests.length}
                             icon={<Package size={24} weight="duotone" />}
                             variant="logistics"
+                            onClick={() => router.push('/logistics/allocations')}
                         />
                         <DashboardCard
                             title="Active Shipments"
                             value={inTransitCount}
                             icon={<Truck size={24} weight="duotone" />}
                             variant="logistics"
+                            onClick={() => router.push('/logistics/shipments?status=IN_TRANSIT')}
                         />
                         <DashboardCard
                             title="Delivered Today"
                             value={deliveredToday}
                             icon={<CheckCircle size={24} weight="duotone" />}
                             variant="logistics"
+                            onClick={() => router.push('/logistics/shipments?status=DELIVERED')}
                         />
                         <DashboardCard
                             title="Total Shipments"
                             value={shipments.length}
                             icon={<MapPin size={24} weight="duotone" />}
                             variant="logistics"
+                            onClick={() => router.push('/logistics/shipments')}
                         />
                     </div>
                 </div>

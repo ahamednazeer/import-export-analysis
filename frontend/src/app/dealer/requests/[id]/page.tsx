@@ -6,7 +6,7 @@ import DashboardLayout from '@/components/DashboardLayout';
 import { ProductRequest } from '@/types';
 import StatusChip from '@/components/StatusChip';
 import { useParams, useRouter } from 'next/navigation';
-import { Package, MapPin, Calendar, ClipboardText, ArrowLeft, Truck, Warehouse } from '@phosphor-icons/react';
+import { Package, MapPin, Calendar, ClipboardText, ArrowLeft, Truck, Warehouse, CheckCircle, Clock } from '@phosphor-icons/react';
 
 export default function RequestDetailsPage() {
     const params = useParams();
@@ -39,6 +39,15 @@ export default function RequestDetailsPage() {
             try {
                 if (params.id) {
                     const data = await api.getRequest(parseInt(params.id as string));
+                    console.log('Fetched request data:', data);
+                    console.log('Reservations:', data.reservations);
+                    if (data.reservations) {
+                        data.reservations.forEach((res: any, index: number) => {
+                            console.log(`Reservation ${index}:`, res);
+                            console.log(`  Has warehouse:`, !!res.warehouse);
+                            console.log(`  Has supplier:`, !!res.supplier);
+                        });
+                    }
                     setRequest(data);
                 }
             } catch (error) {
@@ -171,6 +180,80 @@ export default function RequestDetailsPage() {
                             </h4>
                             <div className="bg-slate-900/50 p-4 rounded-sm text-slate-300 text-sm border-l-2 border-blue-500">
                                 {request.recommendationExplanation}
+                            </div>
+                        </div>
+                    )}
+
+                    {request.reservations && request.reservations.length > 0 && (
+                        <div className="mt-8">
+                            <h4 className="text-slate-400 text-xs uppercase tracking-wider font-mono mb-4 flex items-center gap-2">
+                                <Warehouse size={16} /> Reserved Sources
+                            </h4>
+                            <div className="space-y-4">
+                                {request.reservations.filter(r => r.quantity > 0).map((reservation, index) => (
+                                    <div key={reservation.id} className="bg-slate-900/50 p-4 rounded-sm border border-slate-700/50">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div className="flex items-center gap-3">
+                                                {reservation.warehouse ? (
+                                                    <>
+                                                        <Warehouse size={18} className="text-blue-400" />
+                                                        <div>
+                                                            <p className="text-slate-200 font-medium">{reservation.warehouse.name}</p>
+                                                            <p className="text-slate-400 text-xs">{reservation.warehouse.city}, {reservation.warehouse.country}</p>
+                                                        </div>
+                                                    </>
+                                                ) : reservation.supplier ? (
+                                                    <>
+                                                        <Truck size={18} className="text-green-400" />
+                                                        <div>
+                                                            <p className="text-slate-200 font-medium">{reservation.supplier.name}</p>
+                                                            <p className="text-slate-400 text-xs">{reservation.supplier.city}, {reservation.supplier.country}</p>
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <div>
+                                                        <p className="text-slate-400 text-sm">Unknown source (ID: {reservation.warehouseId || reservation.supplierId})</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="text-right">
+                                                <p className="text-slate-200 font-mono">{reservation.quantity} units</p>
+                                                <p className="text-slate-400 text-xs">
+                                                    {reservation.isLocal ? 'Local' : 'Import'}
+                                                    {reservation.isBlocked && (
+                                                        <span className="text-red-400 ml-2">• Blocked</span>
+                                                    )}
+                                                </p>
+
+                                                <div className="flex justify-end gap-2 mt-2">
+                                                    {/* Status Badges */}
+                                                    {reservation.isPicked && (
+                                                        <span className="flex items-center gap-1 text-[10px] uppercase font-bold text-green-400 bg-green-950/40 px-2 py-0.5 rounded-full border border-green-900/40">
+                                                            <CheckCircle size={12} weight="fill" /> Picked
+                                                        </span>
+                                                    )}
+
+                                                    {reservation.aiConfirmed && (
+                                                        <span className="flex items-center gap-1 text-[10px] uppercase font-bold text-blue-400 bg-blue-950/40 px-2 py-0.5 rounded-full border border-blue-900/40">
+                                                            <CheckCircle size={12} weight="fill" /> AI Checked
+                                                        </span>
+                                                    )}
+
+                                                    {reservation.reservationStatus === 'READY' && (
+                                                        <span className="flex items-center gap-1 text-[10px] uppercase font-bold text-emerald-400 bg-emerald-950/40 px-2 py-0.5 rounded-full border border-emerald-900/40">
+                                                            <CheckCircle size={12} weight="fill" /> Ready
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        {reservation.isBlocked && reservation.blockReason && (
+                                            <div className="mt-2 p-2 bg-red-950/50 border border-red-900/50 rounded text-red-300 text-xs">
+                                                Blocked: {reservation.blockReason}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
                             </div>
                         </div>
                     )}

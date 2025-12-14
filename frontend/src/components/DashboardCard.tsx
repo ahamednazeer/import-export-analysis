@@ -12,6 +12,7 @@ interface DashboardCardProps {
     children?: ReactNode;
     className?: string;
     variant?: 'default' | 'dealer' | 'warehouse' | 'procurement' | 'logistics' | 'admin';
+    onClick?: () => void;
 }
 
 const variantColors = {
@@ -31,15 +32,18 @@ export default function DashboardCard({
     children,
     className = '',
     variant = 'default',
+    onClick,
 }: DashboardCardProps) {
     return (
         <div
+            onClick={onClick}
             className={`
                 bg-slate-800/40 border border-slate-700/60 rounded-sm p-6
                 transition-all duration-300
                 hover:shadow-xl hover:-translate-y-1
                 ${variantColors[variant]}
                 group
+                ${onClick ? 'cursor-pointer' : ''}
                 ${className}
             `}
         >

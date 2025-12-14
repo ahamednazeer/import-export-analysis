@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from app import db
 from app.models.request import ProductRequest, Reservation, RequestStatus
 from app.models.shipment import Shipment, ShipmentStatus
+from app.models.warehouse import Stock
 
 logistics_bp = Blueprint('logistics', __name__)
 
@@ -13,9 +14,9 @@ logistics_bp = Blueprint('logistics', __name__)
 def get_ready_for_allocation():
     """Get requests ready for shipment allocation"""
     claims = get_jwt()
-    
-    if claims['role'] != 'LOGISTICS_PLANNER':
-        return jsonify({'message': 'Logistics planner access required'}), 403
+
+    if claims['role'] not in ['LOGISTICS_PLANNER', 'WAREHOUSE_OPERATOR']:
+        return jsonify({'message': 'Logistics planner or warehouse operator access required'}), 403
     
     requests_list = ProductRequest.query.filter_by(
         status=RequestStatus.READY_FOR_ALLOCATION
@@ -44,6 +45,10 @@ def allocate_shipments(request_id):
     shipments_created = []
     
     for alloc in allocations:
+        # Skip zero-quantity allocations (ghost/replaced items)
+        if alloc['quantity'] <= 0:
+            continue
+
         shipment = Shipment(
             request_id=request_id,
             reservation_id=alloc.get('reservationId'),
@@ -84,6 +89,9 @@ def get_shipments():
     
     if status:
         query = query.filter_by(status=ShipmentStatus(status))
+    
+    # Filter out ghost shipments (Qty 0)
+    query = query.filter(Shipment.quantity > 0)
     
     shipments = query.order_by(Shipment.created_at.desc()).all()
     return jsonify([s.to_dict() for s in shipments])
@@ -152,17 +160,41 @@ def update_shipment_status(shipment_id):
     if new_status == 'DELIVERED':
         shipment.actual_delivery_date = datetime.utcnow().date()
         shipment.delivered_to = data.get('deliveredTo')
-        
-        # Check if all shipments delivered
+
+    elif new_status == 'RECEIVED': # Dealer Confirmation
+        # Check if all shipments received
         product_request = shipment.request
-        all_delivered = all(
-            s.status == ShipmentStatus.DELIVERED
+        all_received = all(
+            s.status == ShipmentStatus.RECEIVED
             for s in product_request.shipments
         )
-        
-        if all_delivered:
+
+        if all_received:
             product_request.status = RequestStatus.COMPLETED
             product_request.completed_at = datetime.utcnow()
+
+            # Release stock reservations and reduce actual stock quantities for completed sales
+            for res in product_request.reservations:
+                if res.warehouse_id and not res.is_blocked:  # Only for successful reservations
+                    # Find stock record - prefer records with available quantity first, then any matching record
+                    stock = Stock.query.filter(
+                        Stock.warehouse_id == res.warehouse_id,
+                        Stock.product_id == product_request.product_id,
+                        Stock.quantity > 0
+                    ).order_by(Stock.quantity.desc()).first()
+
+                    # If no stock with quantity > 0, get any matching record
+                    if not stock:
+                        stock = Stock.query.filter_by(
+                            warehouse_id=res.warehouse_id,
+                            product_id=product_request.product_id
+                        ).first()
+
+                    if stock:
+                        # Release the reservation and reduce actual stock
+                        stock.reserved_quantity = max(0, stock.reserved_quantity - res.quantity)
+                        stock.quantity = max(0, stock.quantity - res.quantity)
+                        print(f"[STOCK_REDUCTION] Reduced stock for warehouse {res.warehouse_id}, product {product_request.product_id}: reserved -{res.quantity}, quantity -{res.quantity}")
     
     db.session.commit()
     return jsonify(shipment.to_dict())

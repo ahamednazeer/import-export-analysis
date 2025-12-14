@@ -18,7 +18,10 @@ class Warehouse(db.Model):
     contact_person = db.Column(db.String(100))
     contact_phone = db.Column(db.String(20))
     contact_email = db.Column(db.String(255))
-    
+
+    # Performance metrics
+    local_delivery_days = db.Column(db.Integer, default=1)  # Days to deliver locally
+
     # Capacity
     total_capacity = db.Column(db.Integer, default=10000)
     current_utilization = db.Column(db.Integer, default=0)

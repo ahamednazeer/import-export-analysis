@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import { ProductRequest } from '@/types';
-import { ArrowLeft, Truck, Package } from '@phosphor-icons/react';
+import { ArrowLeft, Truck, Package, Warehouse, AirplaneTilt, ArrowRight } from '@phosphor-icons/react';
 
 export default function AllocateShipmentPage() {
     const params = useParams();
@@ -35,17 +35,20 @@ export default function AllocateShipmentPage() {
         if (!request) return;
         setSubmitting(true);
         try {
-            // Simplified allocation logic: creating one shipment for the whole request
-            // In a real app we would map reservations to multiple allocations
-            const allocations = [{
-                quantity: request.quantity,
+            // Create separate shipments for each reservation (local + import)
+            const allocations = request.reservations?.map(reservation => ({
+                quantity: reservation.quantity,
                 carrier: carrier,
                 estimatedDeliveryDate: estimatedDelivery,
-                // Assuming first reservation details for simplicity
-                warehouseId: request.reservations?.[0]?.warehouseId,
-                supplierId: request.reservations?.[0]?.supplierId,
-                reservationId: request.reservations?.[0]?.id
-            }];
+                warehouseId: reservation.warehouseId,
+                supplierId: reservation.supplierId,
+                reservationId: reservation.id
+            })) || [];
+
+            if (allocations.length === 0) {
+                alert('No reservations found for allocation');
+                return;
+            }
 
             await api.allocateShipments(request.id, allocations);
             router.push('/logistics');
@@ -68,67 +71,137 @@ export default function AllocateShipmentPage() {
 
     if (!request) return null;
 
+    // Filter active reservations that will be turned into shipments
+    const activeReservations = request.reservations?.filter(r => !r.isBlocked) || [];
+    const totalQuantity = activeReservations.reduce((sum, r) => sum + r.quantity, 0);
+
     return (
         <DashboardLayout userRole="LOGISTICS_PLANNER">
-            <div className="max-w-2xl mx-auto space-y-6">
+            <div className="max-w-4xl mx-auto space-y-6">
                 <button onClick={() => router.back()} className="text-slate-400 hover:text-white text-sm flex items-center gap-2">
                     <ArrowLeft /> Back
                 </button>
 
-                <div className="bg-slate-800/40 border border-slate-700/60 rounded-sm p-6">
-                    <h3 className="text-xl font-bold font-mono text-slate-100 mb-6">Allocate Shipment for {request.requestNumber}</h3>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    {/* Left Column: Source Breakdown */}
+                    <div className="lg:col-span-2 space-y-4">
+                        <div className="bg-slate-800/40 border border-slate-700/60 rounded-sm p-6">
+                            <h3 className="text-xl font-bold font-mono text-slate-100 mb-2">
+                                Request <span className="text-purple-400">{request.requestNumber}</span>
+                            </h3>
+                            <p className="text-slate-400 text-sm mb-6">
+                                {request.product?.name} • Total Qty: {request.quantity}
+                            </p>
 
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-slate-400 text-xs uppercase tracking-wider mb-2 font-mono">Carrier</label>
-                                <select
-                                    className="input-modern"
-                                    value={carrier}
-                                    onChange={(e) => setCarrier(e.target.value)}
-                                >
-                                    <option value="">Select Carrier</option>
-                                    <option value="DHL">DHL Express</option>
-                                    <option value="FedEx">FedEx Logistics</option>
-                                    <option value="BlueDart">BlueDart</option>
-                                    <option value="Maersk">Maersk Line</option>
-                                </select>
-                            </div>
-
-                            <div>
-                                <label className="block text-slate-400 text-xs uppercase tracking-wider mb-2 font-mono">Est. Delivery Date</label>
-                                <input
-                                    type="date"
-                                    className="input-modern cursor-pointer"
-                                    value={estimatedDelivery}
-                                    onChange={(e) => setEstimatedDelivery(e.target.value)}
-                                    onClick={(e) => e.currentTarget.showPicker()}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="bg-slate-900/50 p-4 rounded-sm mt-4">
-                            <h4 className="text-xs uppercase text-slate-500 font-bold mb-2 flex items-center gap-2">
-                                <Package size={16} /> Shipment Summary
+                            <h4 className="text-xs uppercase text-slate-500 font-bold mb-4 tracking-wider">
+                                Source Breakdown (Shipment Plan)
                             </h4>
-                            <div className="flex justify-between items-center text-sm text-slate-300">
-                                <span>Total Quantity</span>
-                                <span className="font-mono text-white">{request.quantity}</span>
+
+                            <div className="space-y-3">
+                                {activeReservations.map((res) => (
+                                    <div key={res.id} className="bg-slate-900/50 border border-slate-700/50 p-4 rounded-sm flex items-center justify-between group hover:border-purple-500/30 transition-colors">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${res.warehouseId ? 'bg-blue-900/30 text-blue-400' : 'bg-orange-900/30 text-orange-400'
+                                                }`}>
+                                                {res.warehouseId ? <Warehouse size={20} /> : <AirplaneTilt size={20} />}
+                                            </div>
+                                            <div>
+                                                <p className="text-slate-200 font-medium">
+                                                    {res.warehouse ? res.warehouse.name : res.supplier ? res.supplier.name : 'Unknown Source'}
+                                                </p>
+                                                <p className="text-xs text-slate-500 font-mono uppercase">
+                                                    {res.warehouseId ? 'Local Warehouse' : 'Import Supplier'}
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-6">
+                                            <div className="text-right">
+                                                <p className="text-2xl font-mono text-white">{res.quantity}</p>
+                                                <p className="text-[10px] text-slate-500 uppercase tracking-wider">Units</p>
+                                            </div>
+                                            <ArrowRight className="text-slate-600" />
+                                            <div className="text-right w-24">
+                                                <p className="text-xs text-slate-400">Shipment #{res.id}</p>
+                                                <p className="text-[10px] text-purple-400 uppercase tracking-wider">Pending</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
-                            <div className="flex justify-between items-center text-sm text-slate-300 mt-2">
-                                <span>Destination</span>
-                                <span className="text-white">{request.deliveryCity}, {request.deliveryState}</span>
+
+                            <div className="mt-4 p-3 bg-blue-900/20 border border-blue-800/30 rounded-sm text-xs text-blue-300 flex items-start gap-2">
+                                <Truck size={16} className="shrink-0 mt-0.5" />
+                                <p>
+                                    This will generate <strong>{activeReservations.length} separate shipments</strong>.
+                                    Each source handles dispatch independently.
+                                </p>
                             </div>
                         </div>
+                    </div>
 
-                        <button
-                            onClick={handleAllocate}
-                            disabled={!carrier || !estimatedDelivery || submitting}
-                            className="btn-primary w-full mt-4 flex justify-center items-center gap-2"
-                        >
-                            <Truck size={18} />
-                            {submitting ? 'Allocating...' : 'Confirm Allocation'}
-                        </button>
+                    {/* Right Column: Allocation Controls */}
+                    <div className="space-y-4">
+                        <div className="bg-slate-800/40 border border-slate-700/60 rounded-sm p-6 sticky top-6">
+                            <h4 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                                <Truck size={18} className="text-purple-400" />
+                                Allocation Details
+                            </h4>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-slate-400 text-xs uppercase tracking-wider mb-2 font-mono">Carrier Service</label>
+                                    <select
+                                        className="input-modern w-full"
+                                        value={carrier}
+                                        onChange={(e) => setCarrier(e.target.value)}
+                                    >
+                                        <option value="">Select Carrier</option>
+                                        <option value="DHL">DHL Express</option>
+                                        <option value="FedEx">FedEx Logistics</option>
+                                        <option value="BlueDart">BlueDart</option>
+                                        <option value="Maersk">Maersk Line</option>
+                                        <option value="Delhivery">Delhivery</option>
+                                    </select>
+                                    <p className="text-[10px] text-slate-500 mt-1">Applied to all {activeReservations.length} shipments</p>
+                                </div>
+
+                                <div>
+                                    <label className="block text-slate-400 text-xs uppercase tracking-wider mb-2 font-mono">Est. Delivery Date</label>
+                                    <input
+                                        type="date"
+                                        className="input-modern cursor-pointer w-full"
+                                        value={estimatedDelivery}
+                                        onChange={(e) => setEstimatedDelivery(e.target.value)}
+                                        onClick={(e) => e.currentTarget.showPicker()}
+                                    />
+                                </div>
+
+                                <div className="border-t border-slate-700 my-4 pt-4">
+                                    <div className="flex justify-between items-center text-sm mb-2">
+                                        <span className="text-slate-400">Total Units</span>
+                                        <span className="text-white font-mono">{totalQuantity}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-sm mb-2">
+                                        <span className="text-slate-400">Shipments</span>
+                                        <span className="text-white font-mono">{activeReservations.length}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center text-sm">
+                                        <span className="text-slate-400">Destination</span>
+                                        <span className="text-white text-right truncate w-32">{request.deliveryCity}</span>
+                                    </div>
+                                </div>
+
+                                <button
+                                    onClick={handleAllocate}
+                                    disabled={!carrier || !estimatedDelivery || submitting}
+                                    className="btn-primary w-full flex justify-center items-center gap-2 py-3"
+                                >
+                                    <Package size={18} weight="bold" />
+                                    {submitting ? 'Allocating...' : 'Confirm Allocation'}
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

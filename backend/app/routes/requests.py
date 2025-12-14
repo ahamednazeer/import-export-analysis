@@ -67,7 +67,10 @@ def get_requests():
 @jwt_required()
 def get_request(request_id):
     """Get a single request by ID"""
-    product_request = ProductRequest.query.get_or_404(request_id)
+    product_request = ProductRequest.query.options(
+        db.selectinload(ProductRequest.reservations).selectinload(Reservation.warehouse),
+        db.selectinload(ProductRequest.reservations).selectinload(Reservation.supplier)
+    ).get_or_404(request_id)
     return jsonify(product_request.to_dict())
 
 
@@ -172,6 +175,16 @@ def confirm_request(request_id):
         product_request.dealer_notes = data.get('notes', product_request.dealer_notes)
         
     elif action == 'cancel':
+        # Release all stock reservations for this request
+        for reservation in product_request.reservations:
+            if reservation.warehouse_id:
+                stock = Stock.query.filter_by(
+                    warehouse_id=reservation.warehouse_id,
+                    product_id=product_request.product_id
+                ).first()
+                if stock:
+                    stock.reserved_quantity = max(0, stock.reserved_quantity - reservation.quantity)
+
         product_request.status = RequestStatus.CANCELLED
         
     else:
@@ -192,10 +205,20 @@ def start_picking(request_id):
     
     product_request = ProductRequest.query.get_or_404(request_id)
     
-    if product_request.status != RequestStatus.RESERVED:
-        return jsonify({'message': 'Request is not in RESERVED status'}), 400
+    allowed_statuses = [
+        RequestStatus.RESERVED, 
+        RequestStatus.PICKING,
+        RequestStatus.INSPECTION_PENDING,
+        RequestStatus.PARTIALLY_BLOCKED,
+        RequestStatus.RESOLVED_PARTIAL,
+        RequestStatus.WAITING_FOR_ALL_PICKUPS
+    ]
     
-    product_request.status = RequestStatus.PICKING
-    db.session.commit()
+    if product_request.status not in allowed_statuses:
+        return jsonify({'message': f'Request status {product_request.status} does not allow picking start'}), 400
+    
+    if product_request.status == RequestStatus.RESERVED:
+        product_request.status = RequestStatus.PICKING
+        db.session.commit()
     
     return jsonify(product_request.to_dict())

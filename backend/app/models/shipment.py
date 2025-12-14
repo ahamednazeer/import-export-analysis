@@ -12,6 +12,7 @@ class ShipmentStatus(Enum):
     IN_TRANSIT = 'IN_TRANSIT'
     OUT_FOR_DELIVERY = 'OUT_FOR_DELIVERY'
     DELIVERED = 'DELIVERED'
+    RECEIVED = 'RECEIVED'  # Dealer confirmed receipt
     FAILED = 'FAILED'
     RETURNED = 'RETURNED'
 
@@ -70,6 +71,8 @@ class Shipment(db.Model):
     
     # Relationships
     request = db.relationship('ProductRequest', back_populates='shipments')
+    warehouse = db.relationship('Warehouse', backref='shipments')
+    supplier = db.relationship('Supplier', backref='shipments')
     
     def generate_tracking_number(self):
         """Generate unique tracking number"""
@@ -77,7 +80,13 @@ class Shipment(db.Model):
         import string
         timestamp = datetime.utcnow().strftime('%Y%m%d%H%M')
         random_suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        prefix = 'IMP' if self.is_import else 'LOC'
+        
+        prefix = 'LOC'
+        if self.warehouse_id and self.warehouse and self.warehouse.code:
+            prefix = self.warehouse.code
+        elif self.is_import:
+            prefix = 'IMP'
+            
         self.tracking_number = f"{prefix}-{timestamp}-{random_suffix}"
     
     def to_dict(self):
@@ -86,9 +95,13 @@ class Shipment(db.Model):
             'id': self.id,
             'trackingNumber': self.tracking_number,
             'requestId': self.request_id,
+            'requestNumber': self.request.request_number if self.request else None,
+            'productName': self.request.product.name if self.request and self.request.product else None,
             'reservationId': self.reservation_id,
             'warehouseId': self.warehouse_id,
+            'warehouseName': self.warehouse.name if self.warehouse_id and self.warehouse else None,
             'supplierId': self.supplier_id,
+            'supplierName': self.supplier.name if self.supplier_id and self.supplier else None,
             'isImport': self.is_import,
             'quantity': self.quantity,
             'status': self.status.value,

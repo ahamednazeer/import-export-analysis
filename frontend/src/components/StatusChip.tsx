@@ -1,7 +1,8 @@
 import React from 'react';
 import { RequestStatus, InspectionResult, ShipmentStatus } from '@/types';
 
-type StatusVariant = RequestStatus | InspectionResult | ShipmentStatus;
+export type UserStatus = 'ACTIVE' | 'INACTIVE';
+export type StatusVariant = RequestStatus | InspectionResult | ShipmentStatus | UserStatus;
 
 interface StatusChipProps {
     status: StatusVariant;
@@ -49,6 +50,17 @@ const statusConfig: Record<string, { bg: string; text: string; border: string; l
         text: 'text-red-400',
         border: 'border-red-500/30',
         label: 'Partially Blocked',
+    },
+    BLOCKED: {
+        bg: 'bg-red-500/20',
+        text: 'text-red-300',
+        border: 'border-red-500/40',
+    },
+    IMPORT_APPROVED: {
+        bg: 'bg-cyan-500/10',
+        text: 'text-cyan-400',
+        border: 'border-cyan-500/30',
+        label: 'Import Approved',
     },
     RESOLVED_PARTIAL: {
         bg: 'bg-orange-500/10',
@@ -159,6 +171,18 @@ const statusConfig: Record<string, { bg: string; text: string; border: string; l
         bg: 'bg-orange-500/10',
         text: 'text-orange-400',
         border: 'border-orange-500/30',
+    },
+
+    // User statuses
+    ACTIVE: {
+        bg: 'bg-green-500/10',
+        text: 'text-green-400',
+        border: 'border-green-500/30',
+    },
+    INACTIVE: {
+        bg: 'bg-slate-500/10',
+        text: 'text-slate-400',
+        border: 'border-slate-500/30',
     },
 };
 

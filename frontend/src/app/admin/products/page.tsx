@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api } from '@/lib/api';
 import DashboardLayout from '@/components/DashboardLayout';
 import Modal from '@/components/Modal';
@@ -93,7 +94,14 @@ export default function AdminProductsPage() {
                         {
                             key: 'sku',
                             label: 'SKU',
-                            render: (item) => <span className="font-mono text-blue-400">{item.sku}</span>
+                            render: (item) => (
+                                <Link
+                                    href={`/admin/products/${item.id}`}
+                                    className="font-mono text-blue-400 hover:text-blue-300 hover:underline"
+                                >
+                                    {item.sku}
+                                </Link>
+                            )
                         },
                         {
                             key: 'name',

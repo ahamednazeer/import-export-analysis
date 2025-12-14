@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  devIndicators: process.env.NODE_ENV === "development" ? { position: "bottom-right" } : false
 };
 
 export default nextConfig;
